@@ -13,30 +13,7 @@
 static uint8_t in_buf[1048576];
 static int in_buflen = 0;
 
-int my_send(int fd, const void *buf, int *buflen)
-{
-    int sent = 0;
-    int send_val = 0;
-
-    while (*buflen > sent) {
-        send_val = send(fd, buf + sent, *buflen - sent, 0);
-        if (send_val < 0) {
-            break;
-        }
-
-        sent += send_val;
-    }
-
-    *buflen = sent;
-
-    if (send_val < 0) {
-        return send_val;
-    }
-    
-    return 0;
-}
-
-int my_recv(int fd, int flags)
+static int my_recv(int fd, int flags)
 {
     int recieved_val = recv(fd, in_buf, sizeof (in_buf), flags);
     if (recieved_val < 0) {
@@ -48,6 +25,30 @@ int my_recv(int fd, int flags)
     return in_buflen;
 }
 
+void my_clean_buf()
+{
+    in_buflen = 0;
+}
+
+int my_send(int fd, const void *buf, int *buflen)
+{
+    int sent = 0;
+    int send_val = 0;
+
+    while (*buflen > sent) {
+        send_val = send(fd, buf + sent, *buflen - sent, 0);
+        if (send_val <= 0) {
+            *buflen = sent;
+            return -1;
+        }
+
+        sent += send_val;
+    }
+
+    *buflen = sent;
+    return 0;
+}
+
 int my_recv_cmd(int fd, char *buf, int *buflen)
 {
     int recieved_val;
@@ -55,7 +56,7 @@ int my_recv_cmd(int fd, char *buf, int *buflen)
         recieved_val = my_recv(fd, 0);
         if (recieved_val <= 0) {
             *buflen = 0;
-            return recieved_val;
+            return (recieved_val == 0 ? 1 : -1);
         }
     }
 
@@ -73,16 +74,10 @@ int my_recv_cmd(int fd, char *buf, int *buflen)
             return 1;
         }
 
-        recieved_val = my_recv(fd, MSG_DONTWAIT);
+        recieved_val = my_recv(fd, 0);
         if (recieved_val <= 0) {
-            in_buflen = 0;
             *buflen = recieved;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return 1;
-            }
-            else {
-                return recieved_val;
-            }
+            return (recieved_val == 0 ? 1 : -1);
         }
         cmd_end = memchr(in_buf, '\n', (size_t) in_buflen);
     }
