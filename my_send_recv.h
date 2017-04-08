@@ -26,4 +26,13 @@ void my_clean_buf();
  */
 int my_recv_cmd(int fd, char *buf, int *buflen);
 
+/**
+ * Description: Read binary data.
+ *              Read up to `buflen` bytes and write to `buf`.
+ *              Actual bytes written will be stored in `buflen`.
+ * Return: -1 if fail, and errno set to appropriate value.
+ *         0 if read succeed.
+ */
+int my_recv_data(int fd, void *buf, int *buflen);
+
 #endif

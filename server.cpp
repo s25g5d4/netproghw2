@@ -1,7 +1,11 @@
 #include <iostream>
+#include <fstream>
+#include <exception>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include "commons.hpp"
 
 extern "C" {
 #include <sys/types.h>
@@ -13,7 +17,7 @@ extern "C" {
 #include <signal.h>
 #include <errno.h>
 
-#include "funcs.h"
+#include "my_send_recv.h"
 }
 
 #define LISTEN_PORT 1732
@@ -156,10 +160,10 @@ int main()
         welcome(reinterpret_cast<struct sockaddr &>(client_addr));
 
         while (1) {
-            char cmd[256];
+            char orig_cmd[256];
             int cmdlen = 255;
-            cmd[255] = '\0';
-            int status = my_recv_cmd(clientfd, cmd, &cmdlen);
+            orig_cmd[255] = '\0';
+            int status = my_recv_cmd(clientfd, orig_cmd, &cmdlen);
             if (status > 0) {
                 if (cmdlen > 0) {
                     cout << "Invalid command recieved. Terminating connection..." << endl;
@@ -170,10 +174,85 @@ int main()
                 perror("my_recv_cmd");
                 break;
             }
-            cmd[cmdlen - 1] = '\0';
-            cout << cmd << endl;
-            cmd[cmdlen - 1] = '\n';
-            my_send(clientfd, cmd, &cmdlen);
+            orig_cmd[cmdlen - 1] = '\0';
+
+            vector<string> cmd = parse_command(orig_cmd);
+            if (cmd.size() == 0) {
+                continue;
+            }
+
+            if (cmd[0] == "send") {
+                if (cmd.size() < 3) {
+                    cout << "Invalid command recieved. Terminating connection..." << endl;
+                    break;
+                }
+
+                int filesize;
+                try {
+                    filesize = stoi(cmd[1]);
+                }
+                catch (exception &e) {
+                    cout << e.what() << endl;
+                    cout << "Invalid command recieved. Terminating connection..." << endl;
+                    break;
+                }
+
+                char *filename_c_str = strstr(orig_cmd, cmd[2].c_str());
+                if (filename_c_str == NULL) {
+                    cout << "Invalid command recieved. Terminating connection..." << endl;
+                    break;
+                }
+                string filename = filename_c_str;
+
+                ofstream file(filename, ofstream::out | ofstream::binary);
+                if (!file.is_open()) {
+                    cout << "Failed to open file " << filename << "." << endl;
+                    cout << "An error has occurred. Terminating connection..." << endl;
+                    break;
+                }
+
+                cout << "Recieving " << filename << " with length " << filesize << " bytes..." << endl;
+
+                int recieved = 0;
+                while (recieved < filesize) {
+                    uint8_t buf[1024];
+                    int buflen = (filesize - recieved < 1024) ? (filesize - recieved) : 1024;
+                    status = my_recv_data(clientfd, buf, &buflen);
+                    if (status < 0) {
+                        perror("my_recv_data");
+                        break;
+                    }
+
+                    if (buflen == 0) {
+                        cout << "Connection closed by peer." << endl;
+                        status = -1;
+                        break;
+                    }
+
+                    recieved += buflen;
+                    file.write(reinterpret_cast<const char *>(&buf), static_cast<streamsize>(buflen));
+                }
+
+                if (status < 0) {
+                    cout << "An error has occurred. Terminating connection..." << endl;
+                    break;
+                }
+
+                string response = "OK " + to_string(filesize) + " bytes recieved.\n";
+                int reslen = static_cast<int>(response.size());
+                status = my_send(clientfd, response.c_str(), &reslen);
+                if (status < 0) {
+                    perror("my_send");
+                    cout << "An error has occurred. Terminating connection..." << endl;
+                    break;
+                }
+
+                cout << response;
+            }
+            else {
+                cout << "Invalid command recieved. Terminating connection..." << endl;
+                break;
+            }
         }
 
         close(clientfd);

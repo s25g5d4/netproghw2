@@ -1,13 +1,17 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <sstream>
 #include <vector>
-#include <iterator>
+
+#include "commons.hpp"
 
 extern "C" {
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -15,8 +19,9 @@ extern "C" {
 #include <signal.h>
 #include <netdb.h>
 #include <errno.h>
+#include <libgen.h>
 
-#include "funcs.h"
+#include "my_send_recv.h"
 }
 
 int sockfd = 0;
@@ -92,20 +97,7 @@ void sigint_safe_exit(int sig)
     exit(1);
 }
 
-std::vector<std::string> parse_command()
-{
-    using namespace std;
-
-    cout << "> " << flush;
-
-    string cmd_str;
-    getline(cin, cmd_str);
-
-    stringstream ss(cmd_str);
-    return vector<string>(istream_iterator<string>(ss), istream_iterator<string>{});
-}
-
-int run_login(std::vector<std::string> cmd)
+int run_login(std::vector<std::string> &cmd)
 {
     if (cmd.size() < 3) {
         std::cout << "Invalid command.";
@@ -126,6 +118,107 @@ int run_login(std::vector<std::string> cmd)
     return 0;
 }
 
+int run_send(std::vector<std::string> &cmd, std::string orig_cmd)
+{
+    using namespace std;
+
+    if (sockfd <= 2) {
+        cout << "You are not logged in yet." << endl;
+        return -1;
+    }
+
+    if (cmd.size() < 2) {
+        cout << "Please provide file name." << endl;
+        return -1;
+    }
+
+    string::size_type n = orig_cmd.find(cmd[1]);
+    if (n == string::npos) {
+        cout << "Command error." << endl;
+        return -1;
+    }
+
+    string pathname(orig_cmd.begin() + n, orig_cmd.end());
+
+    struct stat filestat;
+    int status = stat(pathname.c_str(), &filestat);
+    if (status < 0) {
+        perror("stat");
+        return -1;
+    }
+    if (!S_ISREG(filestat.st_mode)) {
+        cout << "Not a regular file." << endl;
+        return -1;
+    }
+
+    int filesize = static_cast<int>(filestat.st_size);
+    ifstream file(pathname, fstream::in | fstream::binary);
+    if (!file.is_open()) {
+        cout << "Failed to open file." << endl;
+        return -1;
+    }
+
+    char *pathname_c_str = new char[pathname.size() + 1];
+    memcpy(pathname_c_str, pathname.c_str(), pathname.size() + 1);
+
+    string filename = basename(pathname_c_str);
+
+    delete pathname_c_str;
+
+    string send_cmd = "send " + to_string(filesize) + " " + filename + "\n";
+    int sendlen = static_cast<int>(send_cmd.size());
+    status = my_send(sockfd, send_cmd.c_str(), &sendlen);
+    if (status < 0) {
+        perror("my_send");
+        cout << "Send failed." << endl;
+        return -1;
+    }
+
+    int sent = 0;
+    while (sent < filesize) {
+        uint8_t buf[1024];
+        file.read(reinterpret_cast<char *>(&buf), sizeof (buf));
+        int buflen = static_cast<int>(file.gcount());
+        status = my_send(sockfd, buf, &buflen);
+        if (status < 0) {
+            perror("my_send");
+            cout << "Send failed." << endl;
+            return -1;
+        }
+
+        sent += buflen;
+    }
+
+    char msg[256];
+    int msglen = 255;
+    status = my_recv_cmd(sockfd, msg, &msglen);
+    if (status > 0) {
+        cout << "Invalid response. Terminate conneciton." << endl;
+        return -1;
+    }
+    else if (status < 0) {
+        perror("my_recv_cmd");
+        return -1;
+    }
+
+    vector<string> res = parse_command(msg);
+    if (res.size() < 2 || res[0] != "OK") {
+        return -1;
+    }
+    
+    try {
+        sent = stoi(res[1]);
+    }
+    catch (exception &e) {
+        cerr << e.what() << endl;
+        cout << "Invalid response. Terminate conneciton." << endl;
+        return -1;
+    }
+
+    cout << "OK " << sent << " bytes sent." << endl;
+    return 0;
+}
+
 int main()
 {
     struct sigaction sa;
@@ -138,8 +231,10 @@ int main()
     using namespace std;
 
     while (true) {
-        vector<string> cmd = parse_command();
-
+        cout << "> " << flush;
+        string orig_cmd;
+        getline(cin, orig_cmd);
+        vector<string> cmd = parse_command(orig_cmd);
         if (cmd.size() == 0) {
             continue;
         }
@@ -148,51 +243,13 @@ int main()
             run_login(cmd);
         }
         else if (cmd[0] == "send") {
-            if (sockfd <= 2) {
-                cout << "You are not logged in yet." << endl;
-                continue;
-            }
-
-            string data;
-            for (auto it = cmd.begin() + 1; it != cmd.end(); ++it) {
-                data += *it + " ";
-            }
-            if (data.size() > 0) {
-                data.replace(data.end() - 1, data.end(), 1, '\n');
-            }
-            else {
-                data = "\n";
-            }
-            cout << data << endl;
-            int datalen = (int) data.size();
-            int status = my_send(sockfd, data.c_str(), &datalen);
-            if (status < 0) {
-                perror("my_send");
-                break;
-            }
-
-            char msg[256];
-            int msglen = 255;
-            status = my_recv_cmd(sockfd, msg, &msglen);
-            if (status > 0) {
-                cout << "Invalid response. Terminate conneciton." << endl;
-                break;
-            }
-            else if (status < 0) {
-                perror("my_recv_cmd");
-                break;
-            }
-
-            msg[msglen > 0 ? msglen - 1 : 0] = '\0';
-            cout << msg << endl;
+            run_send(cmd, orig_cmd);
         }
         else if (cmd[0] == "logout" || cmd[0] == "exit") {
             break;
         }
         else {
-            cout << "Invalid command:";
-            for (auto &str : cmd) cout << " " << str;
-            cout << endl;
+            cout << "Invalid command." << endl;
             continue;
         }
 

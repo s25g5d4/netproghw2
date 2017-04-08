@@ -10,6 +10,8 @@
 #include <string.h>
 #include <inttypes.h>
 
+#include "my_send_recv.h"
+
 static uint8_t in_buf[1048576];
 static int in_buflen = 0;
 
@@ -96,5 +98,42 @@ int my_recv_cmd(int fd, char *buf, int *buflen)
         return 1;
     }
     
+    return 0;
+}
+
+int my_recv_data(int fd, void *buf, int *buflen)
+{
+    int recieved_val;
+    if (in_buflen == 0) {
+        recieved_val = my_recv(fd, 0);
+        if (recieved_val <= 0) {
+            *buflen = 0;
+            return recieved_val;
+        }
+    }
+
+    int recieved = 0;
+    while (recieved < *buflen) {
+        size_t cpy_size = (size_t) (*buflen - recieved >= in_buflen) ? in_buflen : (*buflen - recieved);
+        memcpy(buf + recieved, in_buf, cpy_size);
+        recieved += cpy_size;
+        if (*buflen <= recieved) {
+            memmove(in_buf, in_buf + cpy_size, in_buflen - cpy_size);
+            in_buflen -= cpy_size;
+            *buflen = recieved;
+            return 0;
+        }
+
+        recieved_val = my_recv(fd, 0);
+        if (recieved_val < 0) {
+            *buflen = recieved;
+            return recieved_val;
+        }
+        if (recieved_val == 0) {
+            break;
+        }
+    }
+
+    *buflen = recieved;
     return 0;
 }
