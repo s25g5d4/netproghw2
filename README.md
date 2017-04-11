@@ -31,7 +31,7 @@ For server, it does not interact with user.
 
 ## Build
 
-Run `make`.
+`$ make`
 
 ## Usage
 
@@ -77,7 +77,7 @@ netproghw2
  ├── my_huffman.hpp - Header of Huffman coding library.
  ├── my_huffman.cpp - Huffman coding library.
  ├── my_send_recv.h - Header of custom send and recv functions.
- └── my_send_recv.c - custom send and recv functions, written in C.
+ └── my_send_recv.c - Custom send and recv functions, written in C.
 ```
 
 ## Protocol
