@@ -2,19 +2,13 @@
 #define __MY_HUFFMAN_HPP__
 
 #include <iostream>
-#include <fstream>
 #include <queue>
 #include <stack>
 #include <vector>
-#include <algorithm>
-#include <string>
-#include <cstring>
-#include <functional>
 #include <memory>
+#include <cstdint>
+#include <cstring>
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace my_huffman
 {
@@ -60,7 +54,7 @@ namespace my_huffman
 
     public:
         /** Char to huffman code */
-        std::vector< std::vector<uint8_t> > _char_table;
+        std::vector< std::vector<uint8_t> > char_table;
 
         /** Constructor */
         huffman(std::istream &input);
@@ -171,7 +165,7 @@ namespace my_huffman
 
             int c = input.get();
             while (!input.eof()) {
-                auto code = _char_table.at(c);
+                auto code = char_table.at(c);
 
                 for (auto bit : code) {
                     _result[result_bytes] |= ( bit << (result_bit_offset) );

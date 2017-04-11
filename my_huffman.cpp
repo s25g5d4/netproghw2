@@ -1,19 +1,4 @@
-﻿#include <iostream>
-#include <fstream>
-#include <queue>
-#include <stack>
-#include <vector>
-#include <algorithm>
-#include <string>
-#include <cstring>
-#include <functional>
-#include <memory>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include "my_huffman.hpp"
+﻿#include "my_huffman.hpp"
 
 using namespace my_huffman;
 
@@ -66,7 +51,7 @@ void huffman::_build_char_table()
 
     // If root is leaf node (i.e. only one kind of char in input file)
     if (_root->data > 0) {
-        _char_table.at(_root->data).push_back(0);
+        char_table.at(_root->data).push_back(0);
 
         return;
     }
@@ -88,7 +73,7 @@ void huffman::_build_char_table(std::shared_ptr<huffman_node> &current, std::vec
     using namespace std;
 
     if (current->data >= 0) {
-        _char_table.at(current->data) = code;
+        char_table.at(current->data) = code;
 
         return;
     }
@@ -110,7 +95,7 @@ huffman::huffman(std::istream &input)
 : _input(&input)
 {
     // for each char (0~255)
-    _char_table.resize(256);
+    char_table.resize(256);
 }
 
 std::vector<uint32_t> huffman::get_header()

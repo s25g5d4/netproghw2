@@ -23,11 +23,75 @@ extern "C" {
 
 #define LISTEN_PORT 1732
 
-int sockfd;
-int clientfd;
+int sockfd = 0;
+int clientfd = 0;
 char welcome_msg[] = "Welcome to my netprog hw2 FTP server\n";
+static void sigint_safe_exit(int sig);
+static const void *get_in_addr(const struct sockaddr &sa);
+static uint16_t get_in_port(const struct sockaddr &sa);
+static int start_server();
+static int welcome(const struct sockaddr &client_addr);
+static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd);
+static int serve_client();
 
-const void *get_in_addr(const struct sockaddr &sa)
+int main()
+{
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = sigint_safe_exit;
+    sa.sa_flags = 0;
+
+    sigaction(SIGINT, &sa, NULL);
+
+    using namespace std;
+
+    int status = start_server();
+    if (status != 0) {
+        if (sockfd > 2) {
+            close(sockfd);
+        }
+        cerr << "Fail to start server." << endl;
+        exit(1);
+    }
+    
+    struct sockaddr_storage client_addr = {};
+    socklen_t client_addr_size = sizeof (client_addr);
+
+    clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
+    while (clientfd > 0) {
+        welcome(reinterpret_cast<struct sockaddr &>(client_addr));
+
+        serve_client();
+
+        close(clientfd);
+        my_clean_buf();
+        cout << "Connection terminated." << endl;
+
+        clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
+    }
+
+    if (clientfd < 0) {
+        perror("accept");
+    }
+
+    close(sockfd);
+    
+    return 1;
+}
+
+static void sigint_safe_exit(int sig)
+{
+    if (clientfd > 2) {
+        close(clientfd);
+    }
+    if (sockfd > 2) {
+        close(sockfd);
+    }
+    std::cerr << "Interrupt." << std::endl;
+    exit(1);
+}
+
+static const void *get_in_addr(const struct sockaddr &sa)
 {
   if (sa.sa_family == AF_INET) {
     return &(reinterpret_cast<const struct sockaddr_in *>(&sa)->sin_addr);
@@ -35,7 +99,7 @@ const void *get_in_addr(const struct sockaddr &sa)
   return &(reinterpret_cast<const struct sockaddr_in6 *>(&sa)->sin6_addr);
 }
 
-uint16_t get_in_port(const struct sockaddr &sa)
+static uint16_t get_in_port(const struct sockaddr &sa)
 {
     if (sa.sa_family == AF_INET) {
         return ntohs(reinterpret_cast<const struct sockaddr_in *>(&sa)->sin_port);
@@ -43,11 +107,12 @@ uint16_t get_in_port(const struct sockaddr &sa)
     return ntohs(reinterpret_cast<const struct sockaddr_in6 *>(&sa)->sin6_port);
 }
 
-int start_server()
+static int start_server()
 {
     int addr_family = AF_INET6;
     sockfd = socket(PF_INET6, SOCK_STREAM, 0);
     if (sockfd < 0) {
+        std::cout << "Fail to open IPv6 socket. Fallback to IPv4 socket." << std::endl;
         addr_family = AF_INET;
         sockfd = socket(PF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
@@ -57,17 +122,20 @@ int start_server()
     }
 
     int status;
-    int no = 0;
-    status = setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &no, sizeof (no));
-    if (status != 0) {
-        std::cerr << "Fail to set dual stack socket." << std::endl;
-        close(sockfd);
 
-        addr_family = AF_INET;
-        sockfd = socket(PF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            perror("socket");
-            return sockfd;
+    if (addr_family == AF_INET6) {
+        int no = 0;
+        status = setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &no, sizeof (no));
+        if (status != 0) {
+            std::cout << "Fail to set dual stack socket. Fallback to IPv4 socket." << std::endl;
+            close(sockfd);
+
+            addr_family = AF_INET;
+            sockfd = socket(PF_INET, SOCK_STREAM, 0);
+            if (sockfd < 0) {
+                perror("socket");
+                return sockfd;
+            }
         }
     }
 
@@ -102,7 +170,7 @@ int start_server()
     return 0;
 }
 
-int welcome(const struct sockaddr &client_addr)
+static int welcome(const struct sockaddr &client_addr)
 {
     char client_addr_p[INET6_ADDRSTRLEN] = {};
     if (inet_ntop(client_addr.sa_family, get_in_addr(client_addr),
@@ -120,19 +188,7 @@ int welcome(const struct sockaddr &client_addr)
     return my_send(clientfd, welcome_msg, &msglen);
 }
 
-void sigint_safe_exit(int sig)
-{
-    if (clientfd > 2) {
-        close(clientfd);
-    }
-    if (sockfd > 2) {
-        close(sockfd);
-    }
-    std::cerr << "Interrupt." << std::endl;
-    exit(1);
-}
-
-int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
+static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
 {
     using namespace std;
 
@@ -213,25 +269,27 @@ int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
 
     codefile.close();
     codefile.open(codefilename, fstream::in | fstream::binary);
-    my_huffman::huffman_decode decode_file(codefile);
-    decode_file.write(file);
+    my_huffman::huffman_decode decode(codefile);
+    decode.write(file);
 
     codefile.close();
     codefile.open(codefilename, fstream::out | fstream::binary | fstream::trunc);
-    int i = 0;
-    for (auto it = decode_file._char_table.begin(); it != decode_file._char_table.end(); ++it) {
-        string s;
-        for (auto it2 = it->begin(); it2 != it->end(); ++it2) {
-            s += (*it2 ? '1' : '0');
+    int char_code = 0;
+    for (auto &code : decode.char_table) {
+        string s(code.size(), '0');
+        for (unsigned int i = 0; i < code.size(); ++i) {
+            if (code[i]) {
+                s[i] = '1';
+            }
         }
-        codefile << i++ << ": " << s << endl;
+        codefile << char_code++ << ": " << s << endl;
     }
 
     cout << "Huffman Code is saved in " << codefilename << " ." << endl;
     return 0;
 }
 
-int serve_client()
+static int serve_client()
 {
     using namespace std;
 
@@ -271,49 +329,4 @@ int serve_client()
     }
 
     return 0;
-}
-
-int main()
-{
-    struct sigaction sa;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_handler = sigint_safe_exit;
-    sa.sa_flags = 0;
-
-    sigaction(SIGINT, &sa, NULL);
-
-    using namespace std;
-
-    int status = start_server();
-    if (status != 0) {
-        if (sockfd > 2) {
-            close(sockfd);
-        }
-        cerr << "Fail to start server." << endl;
-        exit(1);
-    }
-    
-    struct sockaddr_storage client_addr = {};
-    socklen_t client_addr_size = sizeof (client_addr);
-
-    clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
-    while (clientfd > 0) {
-        welcome(reinterpret_cast<struct sockaddr &>(client_addr));
-
-        serve_client();
-
-        close(clientfd);
-        my_clean_buf();
-        cout << "Connection terminated." << endl;
-
-        clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
-    }
-
-    if (clientfd < 0) {
-        perror("accept");
-    }
-
-    close(sockfd);
-    
-    return 1;
 }

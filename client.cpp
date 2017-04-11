@@ -1,18 +1,16 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <sstream>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "commons.hpp"
 #include "my_huffman.hpp"
 
 extern "C" {
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -26,8 +24,66 @@ extern "C" {
 }
 
 int sockfd = 0;
+static void sigint_safe_exit(int sig);
+static int login(const char *addr, const char *port);
+static int run_login(std::vector<std::string> &cmd);
+static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd);
 
-int login(const char *addr, const char *port)
+int main()
+{
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = sigint_safe_exit;
+    sa.sa_flags = 0;
+
+    sigaction(SIGINT, &sa, NULL);
+
+    using namespace std;
+
+    while (true) {
+        cout << "> " << flush;
+        string orig_cmd;
+        getline(cin, orig_cmd);
+        vector<string> cmd = parse_command(orig_cmd);
+        if (cmd.size() == 0) {
+            continue;
+        }
+
+        if (cmd[0] == "login") {
+            run_login(cmd);
+        }
+        else if (cmd[0] == "send") {
+            if (run_send(cmd, orig_cmd) < 0) {
+                break;
+            }
+        }
+        else if (cmd[0] == "logout" || cmd[0] == "exit") {
+            break;
+        }
+        else {
+            cout << "Invalid command." << endl;
+        }
+
+    }
+
+    if (sockfd > 2) {
+        close(sockfd);
+    }
+
+    cout << "Goodbye." << endl;
+    return 0;
+}
+
+static void sigint_safe_exit(int sig)
+{
+    if (sockfd > 2) {
+        close(sockfd);
+    }
+    fprintf(stderr, "Interrupt.\n");
+    exit(1);
+}
+
+static int login(const char *addr, const char *port)
 {
     struct addrinfo hints = {};
     struct addrinfo *res;
@@ -80,16 +136,8 @@ int login(const char *addr, const char *port)
     return 0;
 }
 
-void sigint_safe_exit(int sig)
-{
-    if (sockfd > 2) {
-        close(sockfd);
-    }
-    fprintf(stderr, "Interrupt.\n");
-    exit(1);
-}
 
-int run_login(std::vector<std::string> &cmd)
+static int run_login(std::vector<std::string> &cmd)
 {
     if (cmd.size() < 3) {
         std::cout << "Invalid command.";
@@ -110,7 +158,7 @@ int run_login(std::vector<std::string> &cmd)
     return 0;
 }
 
-int run_send(std::vector<std::string> &cmd, std::string orig_cmd)
+static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
 {
     using namespace std;
 
@@ -132,18 +180,6 @@ int run_send(std::vector<std::string> &cmd, std::string orig_cmd)
 
     string pathname(orig_cmd.begin() + n, orig_cmd.end());
 
-    // struct stat filestat;
-    // int status = stat(pathname.c_str(), &filestat);
-    // if (status < 0) {
-    //     perror("stat");
-    //     return -1;
-    // }
-    // if (!S_ISREG(filestat.st_mode)) {
-    //     cout << "Not a regular file." << endl;
-    //     return -1;
-    // }
-
-    // int filesize = static_cast<int>(filestat.st_size);
     ifstream file(pathname, fstream::in | fstream::binary);
     if (!file.is_open()) {
         cout << "Failed to open file." << endl;
@@ -219,47 +255,3 @@ int run_send(std::vector<std::string> &cmd, std::string orig_cmd)
     return 0;
 }
 
-int main()
-{
-    struct sigaction sa;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_handler = sigint_safe_exit;
-    sa.sa_flags = 0;
-
-    sigaction(SIGINT, &sa, NULL);
-
-    using namespace std;
-
-    while (true) {
-        cout << "> " << flush;
-        string orig_cmd;
-        getline(cin, orig_cmd);
-        vector<string> cmd = parse_command(orig_cmd);
-        if (cmd.size() == 0) {
-            continue;
-        }
-
-        if (cmd[0] == "login") {
-            run_login(cmd);
-        }
-        else if (cmd[0] == "send") {
-            if (run_send(cmd, orig_cmd) < 0) {
-                break;
-            }
-        }
-        else if (cmd[0] == "logout" || cmd[0] == "exit") {
-            break;
-        }
-        else {
-            cout << "Invalid command." << endl;
-        }
-
-    }
-
-    if (sockfd > 2) {
-        close(sockfd);
-    }
-
-    cout << "Goodbye." << endl;
-    return 0;
-}
