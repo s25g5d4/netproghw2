@@ -12,12 +12,12 @@ static int in_buflen = 0;
 
 static int my_recv(int fd, int flags)
 {
-    int recieved_val = recv(fd, in_buf, sizeof (in_buf), flags);
-    if (recieved_val < 0) {
+    int received_val = recv(fd, in_buf, sizeof (in_buf), flags);
+    if (received_val < 0) {
         in_buflen = 0;
-        return recieved_val;
+        return received_val;
     }
-    in_buflen = recieved_val;
+    in_buflen = received_val;
 
     return in_buflen;
 }
@@ -48,47 +48,47 @@ int my_send(int fd, const void *buf, int *buflen)
 
 int my_recv_cmd(int fd, char *buf, int *buflen)
 {
-    int recieved_val;
+    int received_val;
     if (in_buflen == 0) {
-        recieved_val = my_recv(fd, 0);
-        if (recieved_val <= 0) {
+        received_val = my_recv(fd, 0);
+        if (received_val <= 0) {
             *buflen = 0;
-            return (recieved_val == 0 ? 1 : -1);
+            return (received_val == 0 ? 1 : -1);
         }
     }
 
-    int recieved = 0;
+    int received = 0;
 
     uint8_t *cmd_end = (uint8_t *) memchr(in_buf, '\n', (size_t) in_buflen);
     while (cmd_end == NULL) {
-        size_t cpy_size = (size_t) (*buflen - recieved >= in_buflen) ? in_buflen : (*buflen - recieved);
-        memcpy(buf + recieved, in_buf, cpy_size);
-        recieved += cpy_size;
-        if (*buflen <= recieved) {
+        size_t cpy_size = (size_t) (*buflen - received >= in_buflen) ? in_buflen : (*buflen - received);
+        memcpy(buf + received, in_buf, cpy_size);
+        received += cpy_size;
+        if (*buflen <= received) {
             memmove(in_buf, in_buf + cpy_size, in_buflen - cpy_size);
             in_buflen -= cpy_size;
-            *buflen = recieved;
+            *buflen = received;
             return 1;
         }
 
-        recieved_val = my_recv(fd, 0);
-        if (recieved_val <= 0) {
-            *buflen = recieved;
-            return (recieved_val == 0 ? 1 : -1);
+        received_val = my_recv(fd, 0);
+        if (received_val <= 0) {
+            *buflen = received;
+            return (received_val == 0 ? 1 : -1);
         }
         cmd_end = memchr(in_buf, '\n', (size_t) in_buflen);
     }
 
     int end_index = (int)(cmd_end - in_buf) + 1;
 
-    size_t cpy_size = (size_t) (*buflen - recieved >= end_index) ? end_index : (*buflen - recieved);
-    memcpy(buf + recieved, in_buf, cpy_size);
-    recieved += cpy_size;
+    size_t cpy_size = (size_t) (*buflen - received >= end_index) ? end_index : (*buflen - received);
+    memcpy(buf + received, in_buf, cpy_size);
+    received += cpy_size;
     if (in_buflen > cpy_size) {
         memmove(in_buf, in_buf + cpy_size, in_buflen - cpy_size);
     }
     in_buflen -= cpy_size;
-    *buflen = recieved;
+    *buflen = received;
     if (cpy_size < end_index) {
         return 1;
     }
@@ -98,37 +98,37 @@ int my_recv_cmd(int fd, char *buf, int *buflen)
 
 int my_recv_data(int fd, void *buf, int *buflen)
 {
-    int recieved_val;
+    int received_val;
     if (in_buflen == 0) {
-        recieved_val = my_recv(fd, 0);
-        if (recieved_val <= 0) {
+        received_val = my_recv(fd, 0);
+        if (received_val <= 0) {
             *buflen = 0;
-            return recieved_val;
+            return received_val;
         }
     }
 
-    int recieved = 0;
-    while (recieved < *buflen) {
-        size_t cpy_size = (size_t) (*buflen - recieved >= in_buflen) ? in_buflen : (*buflen - recieved);
-        memcpy(buf + recieved, in_buf, cpy_size);
-        recieved += cpy_size;
-        if (*buflen <= recieved) {
+    int received = 0;
+    while (received < *buflen) {
+        size_t cpy_size = (size_t) (*buflen - received >= in_buflen) ? in_buflen : (*buflen - received);
+        memcpy(buf + received, in_buf, cpy_size);
+        received += cpy_size;
+        if (*buflen <= received) {
             memmove(in_buf, in_buf + cpy_size, in_buflen - cpy_size);
             in_buflen -= cpy_size;
-            *buflen = recieved;
+            *buflen = received;
             return 0;
         }
 
-        recieved_val = my_recv(fd, 0);
-        if (recieved_val < 0) {
-            *buflen = recieved;
-            return recieved_val;
+        received_val = my_recv(fd, 0);
+        if (received_val < 0) {
+            *buflen = received;
+            return received_val;
         }
-        if (recieved_val == 0) {
+        if (received_val == 0) {
             break;
         }
     }
 
-    *buflen = recieved;
+    *buflen = received;
     return 0;
 }

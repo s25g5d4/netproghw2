@@ -24,13 +24,33 @@ extern "C" {
 }
 
 int sockfd = 0;
+
+/**
+ * Descrption: Clean exit when SIGINT received.
+ */
 static void sigint_safe_exit(int sig);
+
+/**
+ * Descrption: Connect and login to server.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int login(const char *addr, const char *port);
+
+/**
+ * Descrption: Check and parse user input and run login command.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int run_login(std::vector<std::string> &cmd);
+
+/**
+ * Descrption: Check and parse user input and send file to server.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd);
 
 int main()
 {
+    // Handle SIGINT
     struct sigaction sa;
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = sigint_safe_exit;
@@ -40,6 +60,7 @@ int main()
 
     using namespace std;
 
+    // Prompt for user command
     while (true) {
         cout << "> " << flush;
         string orig_cmd;
@@ -49,6 +70,7 @@ int main()
             continue;
         }
 
+        // Run command
         if (cmd[0] == "login") {
             run_login(cmd);
         }
@@ -66,6 +88,7 @@ int main()
 
     }
 
+    // Clean exit
     if (sockfd > 2) {
         close(sockfd);
     }
@@ -85,6 +108,7 @@ static void sigint_safe_exit(int sig)
 
 static int login(const char *addr, const char *port)
 {
+    // Resolve hostname and connect
     struct addrinfo hints = {};
     struct addrinfo *res;
     hints.ai_family = AF_UNSPEC;
@@ -118,6 +142,7 @@ static int login(const char *addr, const char *port)
         return -1;
     }
 
+    // Read welcome message
     char welcome_msg[64] = {};
     int msglen = (int) sizeof (welcome_msg);
     status = my_recv_cmd(sockfd, welcome_msg, &msglen);
@@ -126,7 +151,7 @@ static int login(const char *addr, const char *port)
         return -1;
     }
     else if (status > 0) {
-        std::cout << "Invalid command recieved." << std::endl;
+        std::cout << "Invalid command received." << std::endl;
         return -1;
     }
 
@@ -172,6 +197,7 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
         return 1;
     }
 
+    // Get file path
     string::size_type n = orig_cmd.find(cmd[1]);
     if (n == string::npos) {
         cout << "Command error." << endl;
@@ -186,6 +212,9 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
         return 1;
     }
 
+    // Get filename
+    // Both dirname() and basename() may modify the contents of path, so it
+    // may be desirable to pass a copy when calling one of these functions.
     char *pathname_c_str = new char[pathname.size() + 1];
     memcpy(pathname_c_str, pathname.c_str(), pathname.size() + 1);
 
@@ -193,6 +222,7 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
 
     delete pathname_c_str;
 
+    // Encode with Huffman Coding
     my_huffman::huffman_encode encoded_file(file);
 
     uint8_t *buf;
@@ -201,6 +231,7 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
     file.seekg(0);
     encoded_file.write(file, &buf, &buflen);
 
+    // Send command to server
     string send_cmd = "send " + to_string(buflen) + " " + filename + "\n";
     int sendlen = static_cast<int>(send_cmd.size());
     int status = my_send(sockfd, send_cmd.c_str(), &sendlen);
@@ -210,6 +241,7 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
         return -1;
     }
 
+    // Send file to server
     status = my_send(sockfd, buf, &buflen);
     if (status < 0) {
         perror("my_send");
@@ -217,6 +249,15 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
         return -1;
     }
 
+    file.clear();
+    file.seekg(0, file.end);
+
+    cout << "Original file size: " << file.tellg() << "bytes, compressed size: " << buflen << " bytes." << endl;
+    cout.precision(2);
+    cout.setf(ios::fixed);
+    cout << "Compression ratio: " << static_cast<double>(buflen)*100.0 / static_cast<double>(file.tellg()) << "%." << endl;
+
+    // Get response
     char msg[MAX_CMD];
     int msglen = MAX_CMD - 1;
     status = my_recv_cmd(sockfd, msg, &msglen);
@@ -246,12 +287,5 @@ static int run_send(std::vector<std::string> &cmd, std::string &orig_cmd)
     }
 
     cout << "OK " << sent << " bytes sent." << endl;
-
-    file.clear();
-    file.seekg(0, file.end);
-
-    cout << "Original size: " << file.tellg() << "bytes, compressed size: " << buflen << " bytes." << endl;
-    cout << "Compression ration: " << static_cast<double>(buflen)*100.0 / static_cast<double>(file.tellg()) << "%" << endl;
     return 0;
 }
-

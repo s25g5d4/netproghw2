@@ -22,7 +22,7 @@ void my_clean_buf();
  * Return: -1 if fail, and errno set to appropriate value.
  *         0 if read succeed and command is valid (end with '\n').
  *         1 if read succeed but command is not valid (not end with '\n') or
-*          read exact `buflen` bytes but no '\n' recieved.
+*          read exact `buflen` bytes but no '\n' received.
  */
 int my_recv_cmd(int fd, char *buf, int *buflen);
 

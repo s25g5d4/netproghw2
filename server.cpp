@@ -22,20 +22,56 @@ extern "C" {
 }
 
 #define LISTEN_PORT 1732
+#define BUFLEN 65536
 
 int sockfd = 0;
 int clientfd = 0;
 char welcome_msg[] = "Welcome to my netprog hw2 FTP server\n";
+
+/**
+ * Descrption: Clean exit when SIGINT received.
+ */
 static void sigint_safe_exit(int sig);
+
+/**
+ * Descrption: Determine and return IPv4 or IPv6 address object.
+ * Return: IPv4 or IPv6 address object (sin_addr or sin6_addr).
+ */
 static const void *get_in_addr(const struct sockaddr &sa);
+
+/**
+ * Descrption: Get port number from sockaddr object.
+ * Return: Unsigned short, host byte order port number.
+ */
 static uint16_t get_in_port(const struct sockaddr &sa);
+
+/**
+ * Descrption: Start server and listening to clients.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int start_server();
+
+/**
+ * Descrption: Print client info and send welcome message to client.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int welcome(const struct sockaddr &client_addr);
-static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd);
+
+/**
+ * Descrption: Receive file sent from client.
+ * Return: 0 if succeed, or -1 if fail.
+ */
+static int receive_file(std::vector<std::string> &cmd, const char *orig_cmd);
+
+/**
+ * Descrption: Read and serve client.
+ * Return: 0 if succeed, or -1 if fail.
+ */
 static int serve_client();
 
 int main()
 {
+    // Handle SIGINT
     struct sigaction sa;
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = sigint_safe_exit;
@@ -45,6 +81,7 @@ int main()
 
     using namespace std;
 
+    // Start server
     int status = start_server();
     if (status != 0) {
         if (sockfd > 2) {
@@ -57,6 +94,7 @@ int main()
     struct sockaddr_storage client_addr = {};
     socklen_t client_addr_size = sizeof (client_addr);
 
+    // Accept client connecting.
     clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
     while (clientfd > 0) {
         welcome(reinterpret_cast<struct sockaddr &>(client_addr));
@@ -64,12 +102,13 @@ int main()
         serve_client();
 
         close(clientfd);
-        my_clean_buf();
+        my_clean_buf(); // See my_send_recv.h
         cout << "Connection terminated." << endl;
 
         clientfd = accept(sockfd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_size);
     }
 
+    // Abnormal exit.
     if (clientfd < 0) {
         perror("accept");
     }
@@ -109,6 +148,7 @@ static uint16_t get_in_port(const struct sockaddr &sa)
 
 static int start_server()
 {
+    // Create socket
     int addr_family = AF_INET6;
     sockfd = socket(PF_INET6, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -117,12 +157,13 @@ static int start_server()
         sockfd = socket(PF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
             perror("socket");
-            return sockfd;
+            return -1;
         }
     }
 
     int status;
 
+    // Set IPv6 dual stack socket
     if (addr_family == AF_INET6) {
         int no = 0;
         status = setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &no, sizeof (no));
@@ -134,7 +175,7 @@ static int start_server()
             sockfd = socket(PF_INET, SOCK_STREAM, 0);
             if (sockfd < 0) {
                 perror("socket");
-                return sockfd;
+                return -1;
             }
         }
     }
@@ -156,13 +197,13 @@ static int start_server()
     
     if (status < 0) {
         perror("bind");
-        return status;
+        return -1;
     }
 
     status = listen(sockfd, 1);
     if (status < 0) {
         perror("listen");
-        return status;
+        return -1;
     }
 
     std::cout << "Start listening at port " << LISTEN_PORT << "." << std::endl;
@@ -179,6 +220,7 @@ static int welcome(const struct sockaddr &client_addr)
         return -1;
     }
 
+    // Extract address from IPv4-mapped IPv6 address.
     int offset = (memcmp(client_addr_p, "::ffff:", 7) == 0) ? 7 : 0;
 
     std::cout << "Connection from " << (client_addr_p + offset) << " port " <<
@@ -188,12 +230,12 @@ static int welcome(const struct sockaddr &client_addr)
     return my_send(clientfd, welcome_msg, &msglen);
 }
 
-static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
+static int receive_file(std::vector<std::string> &cmd, const char *orig_cmd)
 {
     using namespace std;
 
     if (cmd.size() < 3) {
-        cout << "Invalid command recieved. Terminating connection..." << endl;
+        cout << "Invalid command received. Terminating connection..." << endl;
         return -1;
     }
 
@@ -202,13 +244,14 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
         filesize = stoi(cmd[1]);
     }
     catch (exception &e) {
-        cout << "Invalid command recieved. Terminating connection..." << endl;
+        cout << "Invalid command received. Terminating connection..." << endl;
         return -1;
     }
 
+    // Extract filename
     const char *filename_c_str = strstr(orig_cmd, cmd[2].c_str());
     if (filename_c_str == NULL) {
-        cout << "Invalid command recieved. Terminating connection..." << endl;
+        cout << "Invalid command received. Terminating connection..." << endl;
         return -1;
     }
     string filename = filename_c_str;
@@ -221,13 +264,14 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
         return -1;
     }
 
-    cout << "Recieving " << filename << " with length " << filesize << " bytes..." << endl;
+    cout << "Receiving " << filename << " ..." << endl;
 
+    // Write header and compressed data into codefile
     int status = -1;
-    int recieved = 0;
-    while (recieved < filesize) {
-        uint8_t buf[1024];
-        int buflen = (filesize - recieved < 1024) ? (filesize - recieved) : 1024;
+    int received = 0;
+    while (received < filesize) {
+        uint8_t buf[BUFLEN];
+        int buflen = (filesize - received < BUFLEN) ? (filesize - received) : BUFLEN;
         status = my_recv_data(clientfd, buf, &buflen);
         if (status < 0) {
             perror("my_recv_data");
@@ -240,7 +284,7 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
             break;
         }
 
-        recieved += buflen;
+        received += buflen;
         codefile.write(reinterpret_cast<const char *>(&buf), static_cast<streamsize>(buflen));
     }
 
@@ -249,7 +293,7 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
         return -1;
     }
 
-    string response = "OK " + to_string(filesize) + " bytes recieved.\n";
+    string response = "OK " + to_string(filesize) + " bytes received.\n";
     int reslen = static_cast<int>(response.size());
     status = my_send(clientfd, response.c_str(), &reslen);
     if (status < 0) {
@@ -267,11 +311,13 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
         return -1;
     }
 
+    // Decode file
     codefile.close();
     codefile.open(codefilename, fstream::in | fstream::binary);
     my_huffman::huffman_decode decode(codefile);
     decode.write(file);
 
+    // Write code table to codefile
     codefile.close();
     codefile.open(codefilename, fstream::out | fstream::binary | fstream::trunc);
     int char_code = 0;
@@ -285,7 +331,11 @@ static int recieve_file(std::vector<std::string> &cmd, const char *orig_cmd)
         codefile << char_code++ << ": " << s << endl;
     }
 
-    cout << "Huffman Code is saved in " << codefilename << " ." << endl;
+    cout << "Uncompressed file size: " << file.tellp() << " bytes. ";
+    cout.precision(2);
+    cout.setf(ios::fixed);
+    cout << "Compression ratio: " << static_cast<double>(filesize) * 100.0 / static_cast<double>(file.tellp()) << "%." << endl;
+    cout << "Huffman coding table is saved in " << codefilename << " ." << endl;
     return 0;
 }
 
@@ -302,7 +352,7 @@ static int serve_client()
                 // cmdlen == 0 means connection closed by peer.
                 break;
             }
-            cout << "Invalid command recieved. Terminating connection..." << endl;
+            cout << "Invalid command received. Terminating connection..." << endl;
             return -1;
         }
         else if (status < 0) {
@@ -318,12 +368,12 @@ static int serve_client()
         }
 
         if (cmd[0] == "send") {
-            if (recieve_file(cmd, orig_cmd) < 0) {
+            if (receive_file(cmd, orig_cmd) < 0) {
                 return -1;
             }
         }
         else {
-            cout << "Invalid command recieved. Terminating connection..." << endl;
+            cout << "Invalid command received. Terminating connection..." << endl;
             return -1;
         }
     }
